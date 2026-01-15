@@ -1,0 +1,912 @@
+FUNCTION z_log_ytts_func_list .
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(I_TRUCKNO) TYPE  YTRUCK_NO OPTIONAL
+*"     VALUE(I_UNAME) TYPE  UNAME OPTIONAL
+*"  EXPORTING
+*"     VALUE(E_AREA) TYPE  YAREA
+*"     VALUE(E_AREADESC) TYPE  VAL_TEXT
+*"     VALUE(E_REPORTNO) TYPE  YREPORT_NO
+*"     VALUE(E_MATCODE) TYPE  MAKTX
+*"     VALUE(E_INVOICE) TYPE  VBELN_VF
+*"     VALUE(ET_FUNC_LIST) TYPE  ZTT_FUNC_LIST
+*"     VALUE(ET_RETURN) TYPE  BAPIRET2_T
+*"     VALUE(E_LICNO) TYPE  YLICNO
+*"     VALUE(E_DRIVER) TYPE  YDRIVER
+*"     VALUE(E_MNAME) TYPE  ZMNAME
+*"     VALUE(E_LNAME) TYPE  ZNAME3
+*"----------------------------------------------------------------------
+*-----------------------------------------------------------------------
+* Title	             : Get Function List
+* Create Date	       : 06.09.2016
+* Release	           : 6.0
+* Technical Author   : Ramesh Manka
+* Functional Author  : Preyas Desai
+*-----------------------------------------------------------------------
+* Description	: Get Function List based on Truck Number
+*-----------------------------------------------------------------------
+* CHANGE HISTORY
+*-----------------------------------------------------------------------
+*SrNo| Date  | User ID |  Description  |  Change Label   | report output
+*-----------------------------------------------------------------------
+* 01 |08.02.18|pwc_159 | Jobwork senario, Functional: Bangarraju
+*-----------------------------------------------------------------------
+* 02 |30.08.2018|Peol-007|Sort Statement change only|Manoj Swami 8025018 |
+*-----------------------------------------------------------------------
+* 03 |07.09.2018|brilo_005|Logic change to get the latest record based
+*                on MG entered & PP entered date  |Manoj Swami 8025018 |
+*-----------------------------------------------------------------------
+* 04 |DD.MM.YYYY|[USER_ID]|Conditional delete logic based on parameter|
+*                           ZSCM_MOB_MGN_DEL_ACT in ZLOG_EXEC_VAR     |
+*-----------------------------------------------------------------------
+  TYPES:
+        BEGIN OF lty_ytts1,
+          area          TYPE yarea,
+          report_no	    TYPE yreport_no,
+          truck_no      TYPE ytruck_no,
+          transplpt	    TYPE tplst,
+          reject_res    TYPE yreasoncd,
+          trk_purpos    TYPE ytrk_purps,
+          vstel	        TYPE vstel,
+          matgr	        TYPE mvgr1,
+          mg_entr_dt    TYPE datum,
+          mg_entr_tm    TYPE uzeit,
+          pp_entr_dt    TYPE datum,
+          pp_entr_tm    TYPE uzeit,
+          mg_exit_dt    TYPE datum,
+          mg_exit_tm    TYPE uzeit,
+          function      TYPE ystats,
+          licno	        TYPE ylicno,
+          driver        TYPE ydriver,
+          mname	        TYPE zmname,
+          lname	        TYPE zname3,
+          editdt        TYPE dats,
+          edittm        TYPE uzeit,
+          wfinal        TYPE zfeld,
+          rej_res_ar TYPE ystatusflg,
+        END OF lty_ytts1,
+
+        BEGIN OF lty_yttstx0005,
+          area          TYPE yarea,
+          function      TYPE ystats,
+          descr	        TYPE ydescr,
+          END OF lty_yttstx0005,
+
+        BEGIN OF lty_ytts2,
+          area          TYPE yarea,
+          report_no	    TYPE yreport_no,
+          mat_code      TYPE matnr,
+          maktx         TYPE maktx,
+          billno        TYPE vbeln_vf,
+        END OF lty_ytts2,
+
+       BEGIN OF lty_tpfn,
+         fn   TYPE char4,
+         seq  TYPE char1,
+        END OF lty_tpfn,
+
+        BEGIN OF lty_ztcfunction,
+          tcfunct TYPE ztcfunct,
+          tcdesc  TYPE ztcdesc,
+          yttsmap TYPE zytts_tc_map,
+        END OF lty_ztcfunction,
+
+        BEGIN OF lty_exec_var,
+         name     TYPE rvari_vnam,
+         function TYPE ystats,
+         matgr    TYPE zlog_exec_var-matgr,
+         area     TYPE zlog_exec_var-area,
+        END OF lty_exec_var,
+
+        BEGIN OF lty_ztcbpact,
+         area     TYPE ztcbpact-area,
+         tcfunct  TYPE ztcbpact-tcfunct ,
+         matgr    TYPE ztcbpact-matgr ,
+         tccode   TYPE ztcbpact-tccode ,
+         datefrom TYPE ztcbpact-datefrom ,
+         timefrom TYPE ztcbpact-timefrom ,
+         dateto   TYPE ztcbpact-dateto ,
+         timeto   TYPE ztcbpact-timeto ,
+        END OF lty_ztcbpact,
+        BEGIN OF lty_exec,
+          name TYPE rvari_vnam,
+          numb TYPE tvarv_numb,
+          area TYPE yarea,
+        END OF lty_exec.
+
+  " (BOC by Eswara on 11.07.2022 17:15:15
+  TYPES : BEGIN OF lty_param_ytts,
+          name      TYPE zlog_exec_var-name,
+          active    TYPE zlog_exec_var-active,
+          remarks   TYPE zlog_exec_var-remarks,
+          area      TYPE zlog_exec_var-area,
+          function  TYPE zlog_exec_var-function,
+        END OF lty_param_ytts,
+
+        BEGIN OF lty_func_list,
+          function TYPE  ystats,
+          date     TYPE dats,
+          time     TYPE time,
+          descr    TYPE ydescr,
+          ind      TYPE char2,
+          flag     TYPE char1,
+        END OF  lty_func_list.
+
+  DATA : lt_param_ytts TYPE TABLE OF lty_param_ytts,
+         lw_param_ytts TYPE lty_param_ytts .
+  " (EOC by Eswara on  11.07.2022 17:15:15
+  DATA : lt_func_list_temp TYPE ztt_func_list,
+         lt_func_list_z    TYPE ztt_func_list,
+         lw_func_list_temp TYPE zstr_func_list,
+         lw_func_list_z TYPE zstr_func_list.
+
+  FIELD-SYMBOLS : <lfs_func_list> TYPE lty_func_list,
+                  <lfs_func_list_x> TYPE lty_func_list.
+  DATA : lt_func_list TYPE STANDARD TABLE OF lty_func_list,
+         lw_func_list1 TYPE  lty_func_list.
+
+  DATA:
+        lw_return             TYPE bapiret2,
+        lw_tsfrom             TYPE tzonref-tstamps,
+        lw_tsto               TYPE tzonref-tstamps,
+        lw_tscurr             TYPE tzonref-tstamps,
+        lw_ytts1              TYPE lty_ytts1,
+        lw_yttst              TYPE lty_ytts1,
+        lw_ytts               TYPE ytts,
+        lw_yttsa              TYPE yttsa,
+        lw_func_list          TYPE zstr_func_list,
+        lw_ytts2              TYPE lty_ytts2,
+        lw_domvalue           TYPE domvalue_l,
+        lw_yttstx0005         TYPE lty_yttstx0005,
+        lw_btpn               TYPE char1,
+        lw_found              TYPE char1,
+
+
+        lt_ytts1              TYPE STANDARD TABLE OF lty_ytts1,
+        lt_ytts1_t            TYPE STANDARD TABLE OF lty_ytts1,
+        lt_ytts1_jb           TYPE STANDARD TABLE OF lty_ytts1,
+        lt_ytts               TYPE STANDARD TABLE OF ytts,
+        lt_ytts2              TYPE STANDARD TABLE OF ytts,
+        lt_yttsa              TYPE STANDARD TABLE OF yttsa,
+        lt_yttstx0005         TYPE TABLE OF lty_yttstx0005,
+        lt_tpfn               TYPE STANDARD TABLE OF lty_tpfn,
+        lt_exec_var           TYPE STANDARD TABLE OF lty_exec_var,
+        lt_exec_var2          TYPE STANDARD TABLE OF lty_exec_var,
+        lt_ztcfunction        TYPE STANDARD TABLE OF lty_ztcfunction,
+        lt_ztchdr             TYPE STANDARD TABLE OF ztchdr,
+        lt_ztcbpact           TYPE STANDARD TABLE OF lty_ztcbpact,
+        lt_exec               TYPE STANDARD TABLE OF lty_exec,
+        lw_exec               TYPE lty_exec,
+        lw_ztcfunction        LIKE LINE OF lt_ztcfunction,
+        lw_rejectres          TYPE char1,
+        lw_tpn_done           TYPE char1,
+        lw_exit               TYPE char1,
+        lw_tpfn               LIKE LINE OF lt_tpfn,
+        lw_exec_var           LIKE LINE OF lt_exec_var,
+        lw_ztchdr             LIKE LINE OF lt_ztchdr,
+        lw_load               TYPE char1,
+        lw_field              TYPE char10,
+        lw_value1             TYPE ust12-von,
+        lw_value2             TYPE ust12-von,
+        lw_value3             TYPE ust12-von,
+        lw_value4             TYPE ust12-von,
+        lw_value5             TYPE ust12-von,
+        lw_value6             TYPE ust12-von,
+        lw_value7             TYPE ust12-von,
+        lw_value8             TYPE ust12-von,
+        lw_value9             TYPE ust12-von,
+        lw_yreasoncd             TYPE yreasoncd.
+
+  TYPES : BEGIN OF lty_zpara_jw,
+          param1  TYPE zyttspara-param1,
+          param2  TYPE zyttspara-param2,
+          value1  TYPE zyttspara-value1,
+          value2  TYPE zyttspara-value2,
+        END OF lty_zpara_jw.
+  DATA:
+        lt_zpara_jw   TYPE STANDARD TABLE OF lty_zpara_jw,
+        lw_zpara_jw   TYPE lty_zpara_jw,
+        lw_flag_jw    TYPE flag.
+  "BOC by MSAT_060 on 26-06-2019 for CD: 8033766
+  DATA : lw_jg_active TYPE zactive_flag,
+         lw_ytts_t    TYPE ytts.
+  "EOC by MSAT_060 on 26-06-2019 for CD: 8033766
+
+" BEGIN: Cursor Generated Code
+" Variable to store delete parameter active flag for conditional logic
+" Change Date: [DD.MM.YYYY] | Change By: [USER_ID] | CR: [CR_NUMBER]
+  DATA: lv_delete_active TYPE zactive_flag.
+" END: Cursor Generated Code
+
+  FIELD-SYMBOLS: <lfs_val>                TYPE char1,
+                 <lfs_ztcbpact>           LIKE LINE OF lt_ztcbpact,
+                  <lfs_ytts_fun>         TYPE zstr_func_list.
+
+  CONSTANTS:
+        lc_yttsapp              TYPE zyttspara-param1 VALUE 'YTTSAPP',
+        lc_jobwork              TYPE zyttspara-param2 VALUE 'YTTS_JOBWORK',
+        gc_x                    TYPE c                VALUE 'X',
+        gc_name                 TYPE rvari_vnam VALUE 'AREA_EXCLUDE_TRUCK_F4'.
+
+  IF i_uname IS INITIAL.
+    RETURN.
+  ENDIF.
+
+
+  IF i_truckno IS INITIAL.
+    lw_return-type    = 'E'.
+    lw_return-message = text-004.
+    APPEND lw_return TO et_return.
+    RETURN.
+  ENDIF.
+
+  SELECT area
+         report_no
+         truck_no
+         transplpt
+         reject_res
+         trk_purpos
+         vstel
+         matgr
+         mg_entr_dt
+         mg_entr_tm
+         pp_entr_dt
+         pp_entr_tm
+         mg_exit_dt
+         mg_exit_tm
+         function
+         licno
+         driver
+         mname
+         lname
+         editdt
+         edittm
+         wfinal
+         rej_res_ar
+         FROM yttstx0001 CLIENT SPECIFIED
+         INTO TABLE lt_ytts1
+         WHERE mandt    EQ sy-mandt
+           AND truck_no EQ i_truckno.
+  IF sy-subrc EQ 0.
+
+    DELETE lt_ytts1 WHERE truck_no IS INITIAL.
+    DELETE lt_ytts1 WHERE mg_entr_dt IS INITIAL AND pp_entr_dt IS INITIAL AND function = 'MGX'.
+
+    IF NOT lt_ytts1 IS INITIAL.
+      SELECT name numb area
+        FROM zlog_exec_var
+        INTO TABLE lt_exec
+        WHERE name EQ gc_name AND
+              active EQ gc_x.
+      IF sy-subrc IS INITIAL.
+        LOOP AT lt_exec INTO lw_exec.
+          DELETE lt_ytts1 WHERE area EQ lw_exec-area.
+          CLEAR lw_exec.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+
+    LOOP AT lt_ytts1 INTO lw_ytts1 WHERE mg_entr_dt IS INITIAL AND function NE 'MGX'.
+      lw_found = abap_true.
+      EXIT.
+    ENDLOOP.
+
+    IF lw_found EQ abap_false.
+      lt_ytts1_t = lt_ytts1.
+      CLEAR lt_ytts1.
+      LOOP AT lt_ytts1_t INTO lw_ytts1.
+        APPEND lw_ytts1 TO lt_ytts1.
+        IF lw_ytts1-mg_entr_dt IS NOT INITIAL.
+          lw_ytts1-pp_entr_dt   = lw_ytts1-mg_entr_dt.
+          lw_ytts1-pp_entr_tm   = lw_ytts1-mg_entr_tm.
+          APPEND lw_ytts1 TO lt_ytts1.
+        ENDIF.
+        CLEAR lw_ytts1.
+      ENDLOOP.
+      SORT lt_ytts1 BY pp_entr_dt DESCENDING pp_entr_tm DESCENDING.
+      READ TABLE lt_ytts1 INTO lw_ytts1 INDEX 1.
+
+    ENDIF.
+
+  ENDIF.
+
+  IF lt_ytts1 IS INITIAL.
+
+    lw_return-type    = 'E'.
+    lw_return-message = text-005.
+    APPEND lw_return TO et_return.
+    RETURN.
+
+  ELSE.
+
+    IF lw_ytts1-reject_res IS NOT INITIAL.
+
+      SELECT active UP TO 1 ROWS
+        INTO lw_rejectres
+        FROM zlog_exec_var
+        WHERE name = 'TRP_CHK_REJ_REASON'
+        AND   active = abap_true
+        AND reject_res = lw_ytts1-reject_res.
+      ENDSELECT.
+      IF sy-subrc EQ 0.
+        lw_rejectres = abap_true.
+      ELSE.
+        lw_rejectres = abap_false.
+      ENDIF.
+
+    ENDIF.
+
+    IF lw_ytts1-pp_entr_dt IS NOT INITIAL.
+      lw_tpn_done = abap_true.
+    ENDIF.
+    "BOC by MSAT_060 on 26-06-2019 for CD: 8033766
+    SELECT active UP TO 1 ROWS
+          INTO lw_jg_active
+          FROM zlog_exec_var
+          WHERE name = 'ZSCE_CC_POL_PLANT'
+          AND   active = abap_true
+          AND   area   = lw_ytts1-area.
+    ENDSELECT.
+    "EOC by MSAT_060 on 26-06-2019 for CD: 8033766
+    IF lw_ytts1-area      IS NOT INITIAL AND
+       lw_ytts1-report_no IS NOT INITIAL.
+
+      SELECT *
+             FROM yttsa
+             INTO TABLE lt_yttsa
+             WHERE area      EQ lw_ytts1-area
+               AND report_no EQ lw_ytts1-report_no.
+      IF sy-subrc EQ 0.
+        SORT lt_yttsa BY area report_no function editdt edittm DESCENDING.
+        DELETE ADJACENT DUPLICATES FROM lt_yttsa COMPARING area report_no function.
+        SORT lt_yttsa BY editdt ASCENDING edittm ASCENDING.
+      ELSE.
+        lw_return-type    = 'E'.
+        lw_return-message = text-005.
+        APPEND lw_return TO et_return.
+        RETURN.
+      ENDIF.
+
+      SELECT *
+             FROM ytts
+             INTO TABLE lt_ytts
+             WHERE area       EQ lw_ytts1-area
+               AND transplpt  EQ lw_ytts1-transplpt
+               AND vstel      EQ lw_ytts1-vstel
+               AND trk_purpos EQ lw_ytts1-trk_purpos
+               AND matgr      EQ lw_ytts1-matgr.
+      IF sy-subrc EQ 0.
+        DELETE lt_ytts WHERE trk_order EQ space.
+        SORT lt_ytts BY trk_order ASCENDING.
+      ELSE. " try with
+        SELECT *
+           FROM ytts
+           INTO TABLE lt_ytts
+           WHERE area       EQ lw_ytts1-area
+             AND transplpt  EQ lw_ytts1-transplpt
+             AND function   EQ 'TPN'.
+        IF sy-subrc EQ 0.
+          lw_btpn = abap_true.
+          DELETE lt_ytts WHERE trk_order EQ space.
+          DELETE lt_ytts WHERE tcfb IS INITIAL AND
+                               tcsi IS INITIAL AND
+                               tctpn IS INITIAL AND
+                               tcprl IS INITIAL AND
+                               tclod IS INITIAL AND
+                               tcpol IS INITIAL AND
+                               tcsec IS INITIAL AND
+                               tcbay IS INITIAL.
+          SORT lt_ytts BY trk_order ASCENDING.
+        ENDIF.
+        "BOC by MSAT_060 on 00-06-2019 for CD: 8033766
+        IF lw_jg_active EQ abap_true AND
+           lt_ytts IS INITIAL.
+          SELECT *
+             FROM ytts
+             INTO TABLE lt_ytts
+             WHERE area       EQ lw_ytts1-area
+               AND vstel      EQ lw_ytts1-vstel
+               AND trk_purpos EQ lw_ytts1-trk_purpos
+               AND matgr      EQ lw_ytts1-matgr.
+          IF sy-subrc = 0.
+            SORT lt_ytts BY trk_order.
+            DELETE lt_ytts WHERE trk_order IS INITIAL.
+            IF lt_ytts IS NOT INITIAL.
+              READ TABLE lt_ytts INTO lw_ytts_t INDEX 1.
+              IF sy-subrc = 0.
+                lw_ytts1-transplpt = lw_ytts_t-transplpt.
+                CLEAR lt_ytts.
+" BEGIN: Cursor Generated Code - JG Active Path (Second SELECT)
+" Change Date: [DD.MM.YYYY] | Change By: [USER_ID] | CR: [CR_NUMBER]
+                SELECT *
+                FROM ytts
+                INTO TABLE lt_ytts
+                WHERE area       EQ lw_ytts1-area
+                  AND transplpt  EQ lw_ytts1-transplpt
+                  AND vstel      EQ lw_ytts1-vstel
+                  AND trk_purpos EQ lw_ytts1-trk_purpos
+                  AND matgr      EQ lw_ytts1-matgr.
+                IF sy-subrc = 0.
+                  
+                  " Check configuration parameter for conditional delete (JG path - 2nd SELECT)
+                  SELECT SINGLE active
+                    FROM zlog_exec_var
+                    INTO lv_delete_active
+                    WHERE name   EQ 'ZSCM_MOB_MGN_DEL_ACT'
+                      AND active EQ abap_true.
+                  
+                  " Execute conditional delete based on configuration
+                  IF sy-subrc EQ 0 AND lv_delete_active EQ abap_true.
+                    " Configuration parameter is active - delete initial truck orders
+                    DELETE lt_ytts WHERE trk_order IS INITIAL.
+                  ENDIF.
+                  " If parameter not active or not found, keep all records
+                  
+                  SORT lt_ytts BY trk_order.
+" END: Cursor Generated Code
+                ENDIF.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+        "EOC by MSAT_060 on 00-06-2019 for CD: 8033766
+      ENDIF.
+
+      SELECT area
+             function
+             descr
+             FROM yttstx0005
+             INTO TABLE lt_yttstx0005
+             WHERE area     = lw_ytts1-area.
+      IF sy-subrc EQ 0.
+        SORT lt_yttstx0005 BY area function.
+      ENDIF.
+
+      SELECT area
+             tcfunct
+             matgr
+             tccode
+             datefrom
+             timefrom
+             dateto
+             timeto
+       FROM ztcbpact
+        INTO TABLE lt_ztcbpact
+        WHERE area = lw_ytts1-area
+        AND   datefrom LE sy-datum
+        AND   dateto   GE sy-datum
+        AND   active_flag =  abap_true.
+      IF sy-subrc EQ 0.
+        SORT lt_ztcbpact BY area tcfunct matgr.
+        LOOP AT lt_ztcbpact ASSIGNING  <lfs_ztcbpact>.
+          CALL FUNCTION 'CONVERT_INTO_TIMESTAMP'
+            EXPORTING
+              i_datlo     = <lfs_ztcbpact>-datefrom
+              i_timlo     = <lfs_ztcbpact>-timefrom
+            IMPORTING
+              e_timestamp = lw_tsfrom.
+
+          CALL FUNCTION 'CONVERT_INTO_TIMESTAMP'
+            EXPORTING
+              i_datlo     = <lfs_ztcbpact>-dateto
+              i_timlo     = <lfs_ztcbpact>-timeto
+            IMPORTING
+              e_timestamp = lw_tsto.
+
+          CALL FUNCTION 'CONVERT_INTO_TIMESTAMP'
+            EXPORTING
+              i_datlo     = sy-datum
+              i_timlo     = sy-uzeit
+            IMPORTING
+              e_timestamp = lw_tscurr.
+
+          IF lw_tsfrom LE lw_tscurr AND lw_tsto GE lw_tscurr.
+          ELSE.
+            CLEAR  <lfs_ztcbpact>.
+          ENDIF.
+
+        ENDLOOP.
+        DELETE lt_ztcbpact WHERE area IS INITIAL.
+      ENDIF.
+
+      " less entries master data for trip check function
+      SELECT tcfunct
+             tcdesc
+             yttsmap
+        FROM ztcfunction CLIENT SPECIFIED
+        INTO TABLE lt_ztcfunction
+        WHERE mandt = sy-mandt.
+      IF sy-subrc EQ 0.
+        SORT lt_ztcfunction BY tcfunct.
+      ENDIF.
+
+      SELECT *
+        FROM ztchdr
+        INTO TABLE lt_ztchdr
+        WHERE area = lw_ytts1-area
+        AND   report_no =  lw_ytts1-report_no.
+      IF sy-subrc EQ 0.
+        SORT lt_ztchdr BY tcfunct.
+      ENDIF.
+
+      SELECT name
+             function
+             matgr
+             area
+        FROM zlog_exec_var
+        INTO TABLE lt_exec_var
+        WHERE ( name = 'PAY_N_PARK' OR
+                name = 'TRIP_CHECK_LOD' OR
+                name = 'TRIP_CHECK_BAY' OR
+                name = 'REJECT_INDICATOR')
+        AND active = abap_true.
+      IF sy-subrc EQ 0.
+        lt_exec_var2 = lt_exec_var.
+        SORT lt_exec_var  BY name function.
+        SORT lt_exec_var2 BY name matgr area.
+      ENDIF.
+
+      SELECT area
+             report_no
+             mat_code
+             maktx
+             billno
+             FROM yttstx0002
+             INTO lw_ytts2 UP TO 1 ROWS
+             WHERE area      EQ lw_ytts1-area
+               AND report_no EQ lw_ytts1-report_no.
+      ENDSELECT.
+      IF sy-subrc NE 0.
+        CLEAR lw_ytts2.
+      ENDIF.
+
+    ENDIF.
+
+    e_area      = lw_ytts1-area.
+    e_invoice   = lw_ytts2-billno.
+
+    IF lw_ytts2-mat_code IS NOT INITIAL.
+      SELECT SINGLE maktx
+             FROM makt INTO e_matcode
+             WHERE matnr EQ lw_ytts2-mat_code
+               AND spras EQ sy-langu.
+      IF sy-subrc NE 0.
+        CLEAR e_matcode.
+      ENDIF.
+    ENDIF.
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = lw_ytts1-report_no
+      IMPORTING
+        output = e_reportno.
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = lw_ytts2-billno
+      IMPORTING
+        output = e_invoice.
+
+    lw_domvalue = lw_ytts1-area.
+
+    CALL FUNCTION 'DOMAIN_VALUE_GET'
+      EXPORTING
+        i_domname  = 'YAREA'
+        i_domvalue = lw_domvalue
+      IMPORTING
+        e_ddtext   = e_areadesc
+      EXCEPTIONS
+        not_exist  = 1
+        OTHERS     = 2.
+    IF sy-subrc <> 0.
+      CLEAR e_areadesc.
+    ENDIF.
+
+    " functions performed before tpn
+    IF lw_btpn EQ abap_true OR ( lw_tpn_done EQ abap_false AND lw_rejectres EQ abap_true ).
+
+      LOOP AT lt_yttsa INTO lw_yttsa.
+
+        READ TABLE lt_ztcfunction INTO lw_ztcfunction WITH KEY
+        tcfunct = lw_yttsa-function BINARY SEARCH.
+        IF sy-subrc NE 0.
+          READ TABLE lt_yttstx0005 INTO lw_yttstx0005
+                               WITH KEY area     = lw_ytts1-area
+                                        function = lw_yttsa-function
+                                        BINARY SEARCH.
+          IF sy-subrc EQ 0.
+            lw_func_list-descr = lw_yttstx0005-descr.
+          ENDIF.
+          lw_func_list-function = lw_yttsa-function.
+          lw_func_list-date     = lw_yttsa-editdt.
+          lw_func_list-time     = lw_yttsa-edittm.
+          lw_func_list-ind      = 'Z'.
+          APPEND lw_func_list TO et_func_list.
+          CLEAR lw_func_list.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    LOOP AT lt_ytts INTO lw_ytts WHERE area        EQ lw_ytts1-area
+                                   AND transplpt   EQ lw_ytts1-transplpt.
+
+      CLEAR: lw_load.
+
+      REFRESH lt_tpfn.
+
+      " unavoidable
+      LOOP AT lt_ztcfunction INTO lw_ztcfunction.
+        lw_tpfn-fn = lw_ztcfunction-tcfunct.
+        lw_field = lw_ztcfunction-yttsmap.
+        ASSIGN COMPONENT lw_field  OF STRUCTURE lw_ytts TO <lfs_val>.
+        lw_tpfn-seq = <lfs_val>.
+        APPEND lw_tpfn TO lt_tpfn.
+        CLEAR lw_tpfn.
+      ENDLOOP.
+
+      DELETE lt_tpfn WHERE seq IS INITIAL.
+      SORT lt_tpfn BY seq ASCENDING.
+
+      " unavoidable
+      LOOP AT lt_tpfn INTO lw_tpfn.
+
+        READ TABLE lt_ztcbpact TRANSPORTING NO FIELDS WITH KEY area = lw_ytts1-area
+                                                               tcfunct = lw_tpfn-fn
+                                                               matgr = lw_ytts1-matgr
+                                                               BINARY SEARCH.
+        IF sy-subrc EQ 0.
+          CONTINUE.
+        ELSE.
+          READ TABLE lt_ztcbpact TRANSPORTING NO FIELDS WITH KEY area = lw_ytts1-area
+                                                              tcfunct = lw_tpfn-fn
+                                                              matgr = ''
+                                                              BINARY SEARCH.
+          IF sy-subrc EQ 0.
+            CONTINUE.
+          ELSE.
+            READ TABLE lt_ztcbpact TRANSPORTING NO FIELDS WITH KEY area = lw_ytts1-area
+                                                                tcfunct = ''
+                                                                matgr = ''
+                                                                BINARY SEARCH.
+            IF sy-subrc EQ 0.
+              CONTINUE.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+
+        lw_func_list-function = lw_tpfn-fn.
+        CLEAR lw_ztcfunction.
+        READ TABLE lt_ztcfunction INTO lw_ztcfunction
+                                 WITH KEY tcfunct = lw_tpfn-fn
+                                          BINARY SEARCH.
+        IF sy-subrc EQ 0.
+          lw_func_list-descr = lw_ztcfunction-tcdesc.
+        ENDIF.
+
+
+        READ TABLE lt_ztchdr INTO lw_ztchdr WITH KEY tcfunct = lw_tpfn-fn
+                                                     BINARY SEARCH.
+        IF sy-subrc EQ 0 AND lw_ztchdr-status EQ 'A'.
+
+          READ TABLE lt_exec_var INTO lw_exec_var WITH KEY name = 'TRIP_CHECK_LOD'
+                                                       function = lw_tpfn-fn
+                                                       BINARY SEARCH.
+          IF sy-subrc EQ 0 AND lw_ytts1-wfinal NE abap_true .
+            lw_func_list-ind      = 'D'.
+          ELSE.
+            lw_func_list-date     = lw_ztchdr-created_on.
+            lw_func_list-time     = lw_ztchdr-created_tm.
+            lw_func_list-ind      = 'Z'.
+          ENDIF.
+
+        ELSE.
+
+          lw_value1 = lw_ytts-area.
+          lw_value2 = lw_tpfn-fn.
+          lw_value3 = '01'.
+
+          CALL FUNCTION 'AUTHORITY_CHECK'
+            EXPORTING
+              user                = i_uname
+              object              = 'YTTS_AUTH'
+              field1              = 'AREA'
+              value1              = lw_value1
+              field2              = 'FUNCTION'
+              value2              = lw_value2
+              field3              = 'ACTVT'
+              value3              = lw_value3
+            EXCEPTIONS
+              user_dont_exist     = 1
+              user_is_authorized  = 2
+              user_not_authorized = 3
+              user_is_locked      = 4
+              OTHERS              = 5.
+          IF sy-subrc EQ 2.
+            READ TABLE lt_exec_var INTO lw_exec_var WITH KEY name = 'TRIP_CHECK_LOD'
+                                                        function = lw_tpfn-fn
+                                                        BINARY SEARCH.
+            IF sy-subrc EQ 0.
+              lw_func_list-ind = 'A4'.
+            ELSE.
+
+              READ TABLE lt_exec_var INTO lw_exec_var WITH KEY name = 'TRIP_CHECK_BAY'
+                                            function = lw_tpfn-fn
+                                            BINARY SEARCH.
+              IF sy-subrc EQ 0.
+                lw_func_list-ind = 'B'.
+              ELSE.
+                lw_func_list-ind = 'A2'.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+
+        READ TABLE lt_ztchdr INTO lw_ztchdr WITH KEY tcfunct = lw_tpfn-fn BINARY SEARCH.
+        IF sy-subrc EQ 0 AND lw_ztchdr-status EQ 'P'.
+
+          lw_value1 = lw_ztchdr-area.
+          lw_value2 = '01'.
+
+          CALL FUNCTION 'AUTHORITY_CHECK'
+            EXPORTING
+              user                = i_uname
+              object              = 'ZLOG_TRPCK'
+              field1              = 'ZAREA'
+              value1              = lw_value1
+              field2              = 'ACTVT'
+              value2              = lw_value2
+            EXCEPTIONS
+              user_dont_exist     = 1
+              user_is_authorized  = 2
+              user_not_authorized = 3
+              user_is_locked      = 4
+              OTHERS              = 5.
+          IF sy-subrc NE 2.
+            lw_func_list-ind = 'A3'.
+          ELSE.
+            lw_func_list-ind = 'B1'.
+          ENDIF.
+
+        ELSEIF  lw_ztchdr-status EQ 'R'.
+          READ TABLE lt_exec_var2 INTO lw_exec_var WITH KEY name   = 'REJECT_INDICATOR'
+                                                           matgr  = lw_ytts1-matgr
+                                                           area   = lw_ytts1-area BINARY SEARCH.
+          IF sy-subrc EQ 0.
+            CLEAR lw_func_list-ind.
+          ENDIF.
+        ENDIF.
+
+        APPEND lw_func_list TO et_func_list.
+        CLEAR lw_func_list.
+
+        IF lw_tpn_done IS INITIAL AND lw_func_list-function EQ 'TPN'.
+          lw_exit = abap_true.
+          EXIT.
+        ENDIF.
+
+      ENDLOOP.
+
+      IF lw_exit = abap_true.
+        EXIT.
+      ENDIF.
+
+      CLEAR lw_yttstx0005.
+      READ TABLE lt_yttstx0005 INTO lw_yttstx0005
+                               WITH KEY area     = lw_ytts1-area
+                                        function = lw_ytts-function
+                                        BINARY SEARCH.
+      IF sy-subrc EQ 0.
+        lw_func_list-descr = lw_yttstx0005-descr.
+      ENDIF.
+      lw_func_list-function = lw_ytts-function.
+
+      READ TABLE lt_yttsa INTO lw_yttsa
+                          WITH KEY area      = lw_ytts1-area
+                                   report_no = lw_ytts1-report_no
+                                   function  = lw_ytts-function.
+      IF sy-subrc EQ 0.
+        lw_func_list-date     = lw_yttsa-editdt.
+        lw_func_list-time     = lw_yttsa-edittm.
+        lw_func_list-ind      = 'Z'.
+      ELSE.
+
+        READ TABLE lt_exec_var INTO lw_exec_var WITH KEY name = 'PAY_N_PARK'
+                                                         function = lw_ytts-function
+                                                         BINARY SEARCH.
+        IF sy-subrc EQ 0.
+          lw_value1 = lw_ytts-area.
+          lw_value2 = lw_ytts-function.
+          lw_value3 = '01'.
+
+          CALL FUNCTION 'AUTHORITY_CHECK'
+            EXPORTING
+              user                = i_uname
+              object              = 'YTTS_AUTH'
+              field1              = 'AREA'
+              value1              = lw_value1
+              field2              = 'FUNCTION'
+              value2              = lw_value2
+              field3              = 'ACTVT'
+              value3              = lw_value3
+            EXCEPTIONS
+              user_dont_exist     = 1
+              user_is_authorized  = 2
+              user_not_authorized = 3
+              user_is_locked      = 4
+              OTHERS              = 5.
+          IF sy-subrc EQ 2.
+            lw_func_list-ind = 'A1'.
+          ENDIF.
+        ENDIF.
+
+      ENDIF.
+
+      APPEND lw_func_list TO et_func_list.
+
+      IF lw_tpn_done IS INITIAL AND lw_func_list-function EQ 'TPN'.
+        EXIT.
+      ENDIF.
+
+      CLEAR: lw_func_list,lw_ytts,lw_yttsa.
+
+    ENDLOOP.
+    e_licno = lw_ytts1-licno.
+    e_driver = lw_ytts1-driver.
+    e_mname = lw_ytts1-mname.
+    e_lname = lw_ytts1-lname.
+
+  ENDIF.
+
+  IF lw_rejectres EQ  abap_true.
+    DELETE et_func_list WHERE ind NE 'Z'.
+    SORT et_func_list BY function.
+    DELETE et_func_list WHERE function EQ 'PPX'.
+    DELETE ADJACENT DUPLICATES FROM et_func_list COMPARING function.
+    SORT et_func_list BY date ASCENDING time ASCENDING.
+  ENDIF.
+
+  " (BOC by Eswara on 11.07.2022 17:18:13
+
+  SELECT  name
+          active
+          remarks
+          area
+          function FROM zlog_exec_var
+         INTO TABLE lt_param_ytts
+       WHERE name = 'REJECT_YTTS_FUNCTION'
+       AND  active = abap_true.
+  IF sy-subrc IS INITIAL AND lw_ytts1-reject_res IS NOT INITIAL.
+
+    LOOP AT et_func_list INTO lw_func_list.
+      MOVE-CORRESPONDING  lw_func_list TO lw_func_list1.
+      APPEND lw_func_list1 TO lt_func_list.
+      CLEAR : lw_func_list1 , lw_func_list.
+    ENDLOOP.
+
+    LOOP AT lt_func_list ASSIGNING <lfs_func_list>.
+      IF <lfs_func_list>-ind EQ 'Z'.
+        <lfs_func_list>-flag = 'X'.
+        READ TABLE lt_param_ytts INTO lw_param_ytts WITH KEY remarks = <lfs_func_list>-function.
+        IF sy-subrc EQ 0.
+          UNASSIGN <lfs_func_list_x>.
+          READ TABLE lt_func_list ASSIGNING <lfs_func_list_x> WITH KEY function = lw_param_ytts-function.
+          IF sy-subrc EQ 0.
+            <lfs_func_list_x>-flag = 'X'.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+    REFRESH et_func_list.
+    LOOP AT lt_func_list INTO lw_func_list1 .
+      IF lw_func_list1-flag EQ 'X'.
+        MOVE-CORRESPONDING  lw_func_list1 TO lw_func_list.
+        APPEND lw_func_list TO et_func_list.
+        CLEAR :  lw_func_list, lw_func_list1.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  " (EOC by Eswara on  11.07.2022 17:18:13
+
+ENDFUNCTION.
