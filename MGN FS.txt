@@ -1,0 +1,7 @@
+i want you to generate functional specification
+1)	During MGN Save FM: /RWHM/ZMAIN_GATE_ENTRY is getting called.
+a)	In the above fm Z_SCM_YTTS_FUNCTION_CHK getting called to check the current status (Function) of reporting number and next status (Function).
+i)	In the above FM: Z_LOG_YTTS_FUNC_LIST is getting called to get the list of function (status) applicable for entered truck number.
+ii)	After getting data ytts using area, transplpt, vstel, trk_purpos, matgr.
+iii)	Delete records from lt_ytts where trk_order is initial,
+iv) Above Delete statement should be executed only if param ="ZSCM_MOB_MGN_DEL_ACT" is Active in Zlog_exec_var else proceed as it is.
